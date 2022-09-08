@@ -25,6 +25,7 @@ int sleep(int);
 int uptime(void);
 int ntas();
 int nfree();
+int countsys(void);
 
 // ulib.c
 int stat(const char*, struct stat*);

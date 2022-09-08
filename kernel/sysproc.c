@@ -95,3 +95,11 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+uint64 count = 0;
+
+uint64
+sys_countsys(void)
+{
+  return count;
+}
