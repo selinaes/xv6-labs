@@ -80,9 +80,14 @@ usertrap(void)
     exit(-1);
 
   // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2)
+  if(which_dev == 2){
+    if (++p->tickspassed == p->interval){
+      //whenever reaches the interval number of times call
+      p->tickspassed = 0; //reset
+      p->trapframe->epc = p->handler; //put into epc to call handler
+    }
     yield();
-
+  }
   usertrapret();
 }
 
