@@ -81,10 +81,14 @@ usertrap(void)
 
   // give up the CPU if this is a timer interrupt.
   if(which_dev == 2){
-    if (++p->tickspassed == p->interval){
+    if (p->interval && ++p->tickspassed == p->interval){ //checks for interval=0 situation
       //whenever reaches the interval number of times call
       p->tickspassed = 0; //reset
-      p->trapframe->epc = p->handler; //put into epc to call handler
+      if (p->nowhandling == 0){
+        memmove(p->alarmtrapframe, p->trapframe, sizeof(struct trapframe)); //store prev user regs
+        p->nowhandling = 1;
+        p->trapframe->epc = p->handler; //put into epc to call handler
+      }
     }
     yield();
   }
