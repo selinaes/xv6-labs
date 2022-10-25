@@ -117,6 +117,10 @@ found:
   // An empty user page table.
   p->pagetable = proc_pagetable(p);
   p->trap_va = TRAPFRAME;
+
+  // initialize p->thread
+  p->is_thread = 0;
+
   // Set up new context to start executing at forkret,
   // which returns to user space.
   memset(&p->context, 0, sizeof(p->context));
@@ -239,6 +243,91 @@ growproc(int n)
   }
   p->sz = sz;
   return 0;
+}
+
+// Create a new thread, copying the calling thread.
+// Sets up child kernel stack to return as if from fork() system call.
+int
+clone(uint64 fcn, uint64 arg1, uint64 arg2, uint64 stack)
+{
+  int i, pid;
+  struct proc *np;
+  struct proc *p = myproc();
+
+  // Check stack aligned
+  if (stack % PGSIZE != 0){
+    stack = stack & (~(PGSIZE-1));
+  }
+
+  // Allocate thread.
+  if((np = allocproc()) == 0){ //need to make necessary changes to allocproc
+    return -1;
+  }
+
+  // // Copy user memory from parent to child.
+  // if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
+  //   freeproc(np);
+  //   release(&np->lock);
+  //   return -1;
+  // }
+
+  // New: indicate this is a thread
+  np->is_thread = 1;
+
+  np->sz = p->sz;
+
+  np->parent = p;
+  
+
+  // map each thread's trapframe to a unique virtual address in PT
+  // uint64 unique_addr = 0;
+  for (uint64 va = 0; va < MAXVA; va += PGSIZE){
+    if (kwalkaddr(p->pagetable, va) == 0){
+      np->trap_va = va;
+
+      break;
+    }
+  }
+  if (np->trap_va == TRAPFRAME) {
+    release(&np->lock);
+    return -1;
+  }
+
+  mappages(p->pagetable, np->trap_va, PGSIZE,
+      (uint64)(np->trapframe), PTE_R | PTE_W);
+
+
+  // New: same page table, so just copy pointer here
+  np->pagetable = p->pagetable;
+
+  // copy saved user registers (trapframe).
+  *(np->trapframe) = *(p->trapframe);
+
+  // New: copy arg1 and arg2 to registers a0 and a1
+  np->trapframe->a0 = arg1;
+  np->trapframe->a1 = arg2;
+  
+  // New: put the starting fcn of the thread to the epc to call it
+  np->trapframe->epc = fcn;
+
+  // New: put the stack to the proc (TCB)'s stack
+  np->trapframe->sp = stack; // not yet checking alignment
+
+  // increment reference counts on open file descriptors. (no change from fork)
+  for(i = 0; i < NOFILE; i++)
+    if(p->ofile[i])
+      np->ofile[i] = filedup(p->ofile[i]);
+  np->cwd = idup(p->cwd);
+
+  safestrcpy(np->name, p->name, sizeof(p->name));
+
+  pid = np->pid;
+
+  np->state = RUNNABLE;
+
+  release(&np->lock);
+
+  return pid;
 }
 
 // Create a new process, copying the parent.
@@ -379,6 +468,60 @@ exit(int status)
   sched();
   panic("zombie exit");
 }
+
+// Join another thread within the same process, return its pid.
+// Return -1 if this thread has no children.
+// int
+// join(uint64 addr)
+// {
+//   struct proc *np;
+//   int havekids, pid;
+//   struct proc *p = myproc();
+
+//   // hold p->lock for the whole time to avoid lost
+//   // wakeups from a child's exit().
+//   acquire(&p->lock);
+
+//   for(;;){
+//     // Scan through table looking for exited children.
+//     havekids = 0;
+//     for(np = proc; np < &proc[NPROC]; np++){
+//       // this code uses np->parent without holding np->lock.
+//       // acquiring the lock first would cause a deadlock,
+//       // since np might be an ancestor, and we already hold p->lock.
+//       if(np->parent == p){
+//         // np->parent can't change between the check and the acquire()
+//         // because only the parent changes it, and we're the parent.
+//         acquire(&np->lock);
+//         havekids = 1;
+//         if(np->state == ZOMBIE){
+//           // Found one.
+//           pid = np->pid;
+//           if(addr != 0 && copyout(p->pagetable, addr, (char *)&np->xstate,
+//                                   sizeof(np->xstate)) < 0) {
+//             release(&np->lock);
+//             release(&p->lock);
+//             return -1;
+//           }
+//           freeproc(np);
+//           release(&np->lock);
+//           release(&p->lock);
+//           return pid;
+//         }
+//         release(&np->lock);
+//       }
+//     }
+
+//     // No point waiting if we don't have any children.
+//     if(!havekids || p->killed){
+//       release(&p->lock);
+//       return -1;
+//     }
+    
+//     // Wait for a child to exit.
+//     sleep(p, &p->lock);  //DOC: wait-sleep
+//   }
+// }
 
 // Wait for a child process to exit and return its pid.
 // Return -1 if this process has no children.

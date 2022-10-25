@@ -104,4 +104,8 @@ struct proc {
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
   uint64 trap_va;              // trapframe va for threads
+
+  // threads info
+  // void *thread_stack;          // thread's user-space stack pointer
+  int is_thread;               // indicate whether this is a thread
 };

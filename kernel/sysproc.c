@@ -95,3 +95,31 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+uint64
+sys_clone(void)
+{
+  uint64 fcn;
+  uint64 arg1;
+  uint64 arg2;
+  uint64 stack;
+  if(argaddr(0, &fcn) < 0)
+    return -1;
+  if(argaddr(1, &arg1) < 0)
+    return -1;
+  if(argaddr(2, &arg2) < 0)
+    return -1;
+  if(argaddr(3, &stack) < 0)
+    return -1;
+
+  int pid = clone(fcn, arg1, arg2, stack);
+
+  return pid;
+}
+
+uint64
+sys_join(void)
+{
+  // join()
+  return 0;
+}

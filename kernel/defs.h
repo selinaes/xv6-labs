@@ -86,6 +86,7 @@ void            printfinit(void);
 int             cpuid(void);
 void            exit(int);
 int             fork(void);
+int             clone(uint64 fcn, uint64 arg1, uint64 arg2, uint64 stack);
 int             growproc(int);
 pagetable_t     proc_pagetable(struct proc *);
 void            proc_freepagetable(pagetable_t, uint64);

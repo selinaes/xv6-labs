@@ -2,6 +2,7 @@
 #include "kernel/stat.h"
 #include "kernel/fcntl.h"
 #include "user/user.h"
+#include "kernel/riscv.h"
 
 char*
 strcpy(char *s, const char *t)
@@ -133,4 +134,21 @@ void *
 memcpy(void *dst, const void *src, uint n)
 {
   return memmove(dst, src, n);
+}
+
+
+
+int 
+thread_create(void (*start_routine)(void *, void *), void *arg1, void *arg2)
+{
+  void* stack = malloc(PGSIZE);
+  return clone(start_routine, arg1, arg2, stack);
+}
+
+int 
+thread_join()
+{
+  void** stack;
+  join(stack);
+  return 1;
 }
