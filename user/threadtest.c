@@ -37,6 +37,7 @@ emptytest(void *arg1, void* arg2) {
     int int2 = *(int*)arg2;
     int1 = int2 + int1;
     // assert(getpid() == ppid);
+    // printf("emptytest\n");
     exit(0);
 }
 
@@ -73,6 +74,7 @@ stacktest(void *arg1, void* arg2) {
     assert(int2 == 2);
     int1 = int2 + int1;
     assert(int1 == 3);
+    printf("stacktest\n");
     exit(0);
 }
 
@@ -85,6 +87,7 @@ heaptest(void *arg1, void* arg2) {
     assert(global == 0);
     global++;
     assert(global == 1);
+    printf("heaptest\n");
     exit(0);
 }
 
@@ -120,20 +123,32 @@ int test3(){
     uint64 arg1 = 1;
     uint64 arg2 = 2;
 
-    int thread_pid1 = thread_create(stacktest, &arg1, &arg2);
+    int thread_pid1 = thread_create(heaptest, &arg1, &arg2);
+    // printf("arg1 is %d\n",arg1);
+    // printf("arg2 is %d\n",arg2);
 
-    int thread_pid2 = thread_create(heaptest, &arg1, &arg2);
+    int thread_pid2 = thread_create(emptytest, &arg1, &arg2);
+    int thread_pid3 = thread_create(stacktest, &arg1, &arg2);
 
     assert(thread_pid1 > 0);
+    // printf("thread_pid1 is %d\n",thread_pid1);
     assert(thread_pid2 > 0);
+    // printf("thread_pid2 is %d\n",thread_pid2);
+    assert(thread_pid3 > 0);
 
     int join_pid = thread_join();
+    printf("arg1 is %d\n",arg1);
+    printf("arg2 is %d\n",arg2);
     assert(join_pid > 0);
+    // printf("join_pid is %d\n",join_pid);
     join_pid = thread_join();
     assert(join_pid > 0);
+    // printf("join_pid is %d\n",join_pid);
+    join_pid = thread_join();
 
-
+    printf("arg1 is %d\n",arg1);
     assert(arg1 == 1);
+    printf("arg2 is %d\n",arg2);
     assert(arg2 == 2);
     assert(global == 1);
     printf("TEST3 PASSED\n");

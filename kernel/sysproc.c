@@ -120,6 +120,8 @@ sys_clone(void)
 uint64
 sys_join(void)
 {
-  // join()
-  return 0;
+  uint64 stack;
+  if(argaddr(0, &stack) < 0)
+    return -1;
+  return join(stack);
 }

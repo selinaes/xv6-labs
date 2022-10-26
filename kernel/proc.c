@@ -118,7 +118,7 @@ found:
   p->pagetable = proc_pagetable(p);
   p->trap_va = TRAPFRAME;
 
-  // initialize p->thread
+  // initialize p->is_thread flag
   p->is_thread = 0;
 
   // Set up new context to start executing at forkret,
@@ -137,10 +137,19 @@ static void
 freeproc(struct proc *p)
 {
   if(p->trapframe)
-    kfree((void*)p->trapframe);
+  kfree((void*)p->trapframe);
   p->trapframe = 0;
-  if(p->pagetable)
+
+  if (p->is_thread == 0)
+  { // freeing for a process
+    if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
+
+  } else // freeing for a thread
+  {
+    if(p->pagetable)
+    uvmunmap(p->pagetable, p->trap_va, PGSIZE, 0);
+  }
   p->pagetable = 0;
   p->sz = 0;
   p->pid = 0;
@@ -233,6 +242,7 @@ growproc(int n)
   uint sz;
   struct proc *p = myproc();
 
+  acquire(&p->lock);
   sz = p->sz;
   if(n > 0){
     if((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
@@ -242,6 +252,14 @@ growproc(int n)
     sz = uvmdealloc(p->pagetable, sz, sz + n);
   }
   p->sz = sz;
+
+  struct proc *np;
+  for(np = proc; np < &proc[NPROC]; np++){
+      if(np->parent == p && np->is_thread == 1){
+        np->sz = sz;
+      }
+  }
+  release(&p->lock);
   return 0;
 }
 
@@ -254,14 +272,16 @@ clone(uint64 fcn, uint64 arg1, uint64 arg2, uint64 stack)
   struct proc *np;
   struct proc *p = myproc();
 
-  // Check stack aligned
-  if (stack % PGSIZE != 0){
-    stack = stack & (~(PGSIZE-1));
-  }
 
   // Allocate thread.
   if((np = allocproc()) == 0){ //need to make necessary changes to allocproc
     return -1;
+  }
+
+  np->thread_stack = (void *)stack;
+  // Check stack aligned
+  if (stack % PGSIZE != 0){
+    stack = stack & (~(PGSIZE-1));
   }
 
   // // Copy user memory from parent to child.
@@ -306,12 +326,16 @@ clone(uint64 fcn, uint64 arg1, uint64 arg2, uint64 stack)
   // New: copy arg1 and arg2 to registers a0 and a1
   np->trapframe->a0 = arg1;
   np->trapframe->a1 = arg2;
+  // printf("a0 saves %d", *((uint64*)np->trapframe->a0));
+  // printf("a1 saves %d", *((uint64*)np->trapframe->a1));
+  // fprintf(2, "a0 saves %d", np->trapframe->a0);
+  // fprintf(2, "a1 saves %d", np->trapframe->a1);
   
   // New: put the starting fcn of the thread to the epc to call it
   np->trapframe->epc = fcn;
 
   // New: put the stack to the proc (TCB)'s stack
-  np->trapframe->sp = stack; // not yet checking alignment
+  np->trapframe->sp = stack + PGSIZE; // not yet checking alignment
 
   // increment reference counts on open file descriptors. (no change from fork)
   for(i = 0; i < NOFILE; i++)
@@ -411,6 +435,9 @@ exit(int status)
 {
   struct proc *p = myproc();
 
+
+
+
   if(p == initproc)
     panic("init exiting");
 
@@ -470,58 +497,60 @@ exit(int status)
 }
 
 // Join another thread within the same process, return its pid.
-// Return -1 if this thread has no children.
-// int
-// join(uint64 addr)
-// {
-//   struct proc *np;
-//   int havekids, pid;
-//   struct proc *p = myproc();
+// Return -1 on failure (no thread to wait).
+int
+join(uint64 stack)
+{
+  struct proc *np;
+  int havekids, pid;
+  struct proc *p = myproc();
 
-//   // hold p->lock for the whole time to avoid lost
-//   // wakeups from a child's exit().
-//   acquire(&p->lock);
+  // hold p->lock for the whole time to avoid lost
+  // wakeups from a child's exit().
+  acquire(&p->lock);
 
-//   for(;;){
-//     // Scan through table looking for exited children.
-//     havekids = 0;
-//     for(np = proc; np < &proc[NPROC]; np++){
-//       // this code uses np->parent without holding np->lock.
-//       // acquiring the lock first would cause a deadlock,
-//       // since np might be an ancestor, and we already hold p->lock.
-//       if(np->parent == p){
-//         // np->parent can't change between the check and the acquire()
-//         // because only the parent changes it, and we're the parent.
-//         acquire(&np->lock);
-//         havekids = 1;
-//         if(np->state == ZOMBIE){
-//           // Found one.
-//           pid = np->pid;
-//           if(addr != 0 && copyout(p->pagetable, addr, (char *)&np->xstate,
-//                                   sizeof(np->xstate)) < 0) {
-//             release(&np->lock);
-//             release(&p->lock);
-//             return -1;
-//           }
-//           freeproc(np);
-//           release(&np->lock);
-//           release(&p->lock);
-//           return pid;
-//         }
-//         release(&np->lock);
-//       }
-//     }
+  for(;;){
+    // Scan through table looking for exited children.
+    havekids = 0;
+    for(np = proc; np < &proc[NPROC]; np++){
+      // this code uses np->parent without holding np->lock.
+      // acquiring the lock first would cause a deadlock,
+      // since np might be an ancestor, and we already hold p->lock.
+      if(np->parent == p && np->is_thread == 1){
+        // np->parent can't change between the check and the acquire()
+        // because only the parent changes it, and we're the parent.
+        acquire(&np->lock);
+        havekids = 1;
+        if(np->state == ZOMBIE){
+          // Found one.
+          pid = np->pid;
+          
+          // New: copyout the stack, not the xstate here
+          if(stack != 0 && copyout(p->pagetable, stack, (char*)&np->thread_stack,
+                                  sizeof(np->thread_stack)) < 0) {
+            release(&np->lock);
+            release(&p->lock);
+            return -1;
+          }
+          freeproc(np);
+          release(&np->lock);
+          release(&p->lock);
+          return pid;
+        }
+        release(&np->lock);
+      }
+    }
 
-//     // No point waiting if we don't have any children.
-//     if(!havekids || p->killed){
-//       release(&p->lock);
-//       return -1;
-//     }
+    // No point waiting if we don't have any children.
+    if(!havekids || p->killed){
+      release(&p->lock);
+      return -1;
+    }
     
-//     // Wait for a child to exit.
-//     sleep(p, &p->lock);  //DOC: wait-sleep
-//   }
-// }
+    // Wait for a child to exit.
+    sleep(p, &p->lock);  //DOC: wait-sleep
+  }
+}
 
 // Wait for a child process to exit and return its pid.
 // Return -1 if this process has no children.
@@ -543,7 +572,7 @@ wait(uint64 addr)
       // this code uses np->parent without holding np->lock.
       // acquiring the lock first would cause a deadlock,
       // since np might be an ancestor, and we already hold p->lock.
-      if(np->parent == p){
+      if(np->parent == p && np->is_thread == 0){
         // np->parent can't change between the check and the acquire()
         // because only the parent changes it, and we're the parent.
         acquire(&np->lock);
