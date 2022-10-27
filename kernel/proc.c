@@ -139,26 +139,25 @@ freeproc(struct proc *p)
   if(p->trapframe)
   kfree((void*)p->trapframe);
   p->trapframe = 0;
-  if (p->is_thread == 0) {
-    struct proc *pp;
-
-    for(pp = proc; pp < &proc[NPROC]; pp++){
-      if((pp->pagetable == p->pagetable) & (pp->is_thread == 1)){
-        if(pp->trapframe)
-          kfree((void*)pp->trapframe);
-        pp->trapframe = 0;
-        if(pp->pagetable)
-          uvmunmap(pp->pagetable, pp->trap_va, PGSIZE, 0);
+  if (p->is_thread == 0) { // if process, unmap all children thread & clear trapframe
+    struct proc *np;
+    for(np = proc; np < &proc[NPROC]; np++){
+      if((np->pagetable == p->pagetable) & (np->is_thread == 1)){
+        if(np->trapframe)
+          kfree((void*)np->trapframe);
+        np->trapframe = 0;
+        if(np->pagetable)
+          uvmunmap(np->pagetable, np->trap_va, PGSIZE, 0);
       }
     }
   }
 
   if (p->is_thread == 0)
-  { // freeing for a process
+  { // if a process, free pagetable
     if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
 
-  } else // freeing for a thread
+  } else // if a thread, only unmap
   {
     if(p->pagetable)
     uvmunmap(p->pagetable, p->trap_va, PGSIZE, 0);
@@ -258,24 +257,24 @@ growproc(int n)
   sz = p->sz;
   if(n > 0){
     if((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
-      if (p->is_thread == 0){ //
+      // before return on -1, release lock
+      if (p->is_thread == 0){ 
         release(&p->lock);
       } else {
         release(&p->parent->lock);
       }
+      //
       return -1;
     }
   } else if(n < 0){
     sz = uvmdealloc(p->pagetable, sz, sz + n);
   }
-  uint orig = p->sz;
+
   p->sz = sz;
-  printf("p %d changed from sz %d to sz %d\n",p->pid, orig, p->sz);
 
   struct proc *np;
   for(np = proc; np < &proc[NPROC]; np++){
       if(np->pagetable == p->pagetable){
-        printf("np %d is synchronizing\n",np->pid);
         np->sz = sz;
       }
   }
@@ -304,12 +303,6 @@ clone(uint64 fcn, uint64 arg1, uint64 arg2, uint64 stack)
     stack = stack & (~(PGSIZE-1));
   }
 
-  // // Copy user memory from parent to child.
-  // if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
-  //   freeproc(np);
-  //   release(&np->lock);
-  //   return -1;
-  // }
 
   // New: indicate this is a thread
   np->is_thread = 1;
@@ -324,7 +317,6 @@ clone(uint64 fcn, uint64 arg1, uint64 arg2, uint64 stack)
   for (uint64 va = MAXVA - 2*PGSIZE; va >= 0; va -= PGSIZE){
     if (kwalkaddr(p->pagetable, va) == 0){
       np->trap_va = va;
-      printf("unique addr of %d is %d\n",np->pid,np->trap_va);
       break;
     }
   }
@@ -346,10 +338,6 @@ clone(uint64 fcn, uint64 arg1, uint64 arg2, uint64 stack)
   // New: copy arg1 and arg2 to registers a0 and a1
   np->trapframe->a0 = arg1;
   np->trapframe->a1 = arg2;
-  // printf("a0 saves %d", *((uint64*)np->trapframe->a0));
-  // printf("a1 saves %d", *((uint64*)np->trapframe->a1));
-  // fprintf(2, "a0 saves %d", np->trapframe->a0);
-  // fprintf(2, "a1 saves %d", np->trapframe->a1);
   
   // New: put the starting fcn of the thread to the epc to call it
   np->trapframe->epc = fcn;

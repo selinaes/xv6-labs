@@ -57,10 +57,9 @@ sys_sbrk(void)
   addr = p->sz;
   
   if(growproc(n) < 0){
-    release(&p->lock);
     return -1;
   }
-  if (p->is_thread == 0){ //
+  if (p->is_thread == 0){
     release(&p->lock);
   } else {
     release(&p->parent->lock);

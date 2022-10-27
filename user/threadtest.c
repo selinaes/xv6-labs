@@ -43,7 +43,7 @@ emptytest(void *arg1, void* arg2) {
 
 void sbrktest(void* arg1, void* arg2) {
     char* b = sbrk(65536);
-    printf("sbrk end\n");
+    // printf("sbrk end\n");
     for (int i = 0; i < 4096000; i++) {
         b[i % 65536] = 0;
     }
