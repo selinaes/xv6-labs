@@ -139,6 +139,19 @@ freeproc(struct proc *p)
   if(p->trapframe)
   kfree((void*)p->trapframe);
   p->trapframe = 0;
+  if (p->is_thread == 0) {
+    struct proc *pp;
+
+    for(pp = proc; pp < &proc[NPROC]; pp++){
+      if((pp->pagetable == p->pagetable) & (pp->is_thread == 1)){
+        if(pp->trapframe)
+          kfree((void*)pp->trapframe);
+        pp->trapframe = 0;
+        if(pp->pagetable)
+          uvmunmap(pp->pagetable, pp->trap_va, PGSIZE, 0);
+      }
+    }
+  }
 
   if (p->is_thread == 0)
   { // freeing for a process
@@ -242,24 +255,30 @@ growproc(int n)
   uint sz;
   struct proc *p = myproc();
 
-  acquire(&p->lock);
   sz = p->sz;
   if(n > 0){
     if((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
+      if (p->is_thread == 0){ //
+        release(&p->lock);
+      } else {
+        release(&p->parent->lock);
+      }
       return -1;
     }
   } else if(n < 0){
     sz = uvmdealloc(p->pagetable, sz, sz + n);
   }
+  uint orig = p->sz;
   p->sz = sz;
+  printf("p %d changed from sz %d to sz %d\n",p->pid, orig, p->sz);
 
   struct proc *np;
   for(np = proc; np < &proc[NPROC]; np++){
-      if(np->parent == p && np->is_thread == 1){
+      if(np->pagetable == p->pagetable){
+        printf("np %d is synchronizing\n",np->pid);
         np->sz = sz;
       }
   }
-  release(&p->lock);
   return 0;
 }
 
@@ -278,6 +297,7 @@ clone(uint64 fcn, uint64 arg1, uint64 arg2, uint64 stack)
     return -1;
   }
 
+  acquire(&p->lock);
   np->thread_stack = (void *)stack;
   // Check stack aligned
   if (stack % PGSIZE != 0){
@@ -301,10 +321,10 @@ clone(uint64 fcn, uint64 arg1, uint64 arg2, uint64 stack)
 
   // map each thread's trapframe to a unique virtual address in PT
   // uint64 unique_addr = 0;
-  for (uint64 va = 0; va < MAXVA; va += PGSIZE){
+  for (uint64 va = MAXVA - 2*PGSIZE; va >= 0; va -= PGSIZE){
     if (kwalkaddr(p->pagetable, va) == 0){
       np->trap_va = va;
-
+      printf("unique addr of %d is %d\n",np->pid,np->trap_va);
       break;
     }
   }
@@ -349,6 +369,7 @@ clone(uint64 fcn, uint64 arg1, uint64 arg2, uint64 stack)
 
   np->state = RUNNABLE;
 
+  release(&p->lock);
   release(&np->lock);
 
   return pid;

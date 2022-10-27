@@ -43,12 +43,28 @@ sys_sbrk(void)
 {
   int addr;
   int n;
-
+  
   if(argint(0, &n) < 0)
     return -1;
-  addr = myproc()->sz;
-  if(growproc(n) < 0)
+
+  struct proc *p = myproc();
+  if (p->is_thread == 0){ //
+    acquire(&p->lock);
+  } else {
+    acquire(&p->parent->lock);
+  }
+  
+  addr = p->sz;
+  
+  if(growproc(n) < 0){
+    release(&p->lock);
     return -1;
+  }
+  if (p->is_thread == 0){ //
+    release(&p->lock);
+  } else {
+    release(&p->parent->lock);
+  }
   return addr;
 }
 
