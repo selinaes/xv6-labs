@@ -57,6 +57,7 @@ kvminithart()
   sfence_vma();
 }
 
+
 // Return the address of the PTE in page table pagetable
 // that corresponds to virtual address va.  If alloc!=0,
 // create any required page-table pages.
@@ -74,7 +75,6 @@ walk(pagetable_t pagetable, uint64 va, int alloc)
 {
   if(va >= MAXVA)
     panic("walk");
-
   for(int level = 2; level > 0; level--) {
     pte_t *pte = &pagetable[PX(level, va)];
     if(*pte & PTE_V) {
@@ -87,6 +87,49 @@ walk(pagetable_t pagetable, uint64 va, int alloc)
     }
   }
   return &pagetable[PX(0, va)];
+}
+
+// Function to handle COW page fault
+uint64 
+cow_handle(pagetable_t pt, uint64 va){
+  pte_t *pte = walk(pt, va, 0);
+  if (pte == 0 || (*pte & PTE_U)>>4 == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_RSW)>>8 == 0 ){
+    return -1;
+  }
+
+  uint64 pa_orig = PTE2PA(*pte);
+  
+  // Use kalloc to allocate a new page
+  if (count_ref(pa_orig) == 1) {
+    *pte = *pte & ~PTE_RSW;
+    *pte = *pte | PTE_W;
+    return pa_orig;
+  } else {
+    uint64 pa_new = (uint64)kalloc();
+    if (pa_new == 0){
+      return -1;
+    }
+
+    // Copy old page to new page
+    memmove((void*)pa_new, (void*)pa_orig, PGSIZE);
+
+    // Install new page in PTE with PTE_W set
+    *pte = *pte & ~PTE_V;
+    *pte = *pte | PTE_W;
+    *pte = *pte & ~PTE_RSW;
+    uint flags = PTE_FLAGS(*pte);
+    
+    if (mappages(pt, va, PGSIZE, pa_new, flags) != 0) {
+      kfree((void*)pa_new);
+      *pte = *pte | PTE_V;
+      return -1;
+    }
+    
+    kfree((void*)pa_orig);
+    return pa_new;
+  }
+
+  
 }
 
 // Look up a virtual address, return the physical address,
@@ -286,6 +329,7 @@ uvmfree(pagetable_t pagetable, uint64 sz)
   freewalk(pagetable);
 }
 
+
 // CoW: Given a parent process's page table, 
 // map parent's PA into child's page table.
 // Do not copy physical memory
@@ -305,16 +349,16 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
+
     *pte &= ~PTE_W;
+    *pte |= PTE_RSW;
     flags = PTE_FLAGS(*pte);
-    flags &= ~PTE_W; // clear the W bit in flag (for child PTE)
-    // if((mem = kalloc()) == 0)
-    //   goto err;
-    // memmove(mem, (char*)pa, PGSIZE);
-    
+
     if(mappages(new, i, PGSIZE, (uint64)pa, flags) != 0){
       goto err;
     }
+
+    increment_ref(pa);
   }
   return 0;
 
@@ -336,6 +380,7 @@ uvmclear(pagetable_t pagetable, uint64 va)
   *pte &= ~PTE_U;
 }
 
+
 // Copy from kernel to user.
 // Copy len bytes from src to virtual address dstva in a given page table.
 // Return 0 on success, -1 on error.
@@ -349,6 +394,13 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0)
       return -1;
+    pte_t *pte = walk(pagetable, va0, 0);
+    if ((*pte & PTE_RSW) != 0){
+      pa0 = cow_handle(pagetable, va0);
+      if(pa0 == -1)
+        return -1;
+    }
+
     n = PGSIZE - (dstva - va0);
     if(n > len)
       n = len;

@@ -63,6 +63,8 @@ void            ramdiskrw(struct buf*);
 void*           kalloc(void);
 void            kfree(void *);
 void            kinit(void);
+int             count_ref(uint64);
+void            increment_ref(uint64);
 
 // log.c
 void            initlog(int, struct superblock*);
@@ -166,6 +168,7 @@ int             uvmcopy(pagetable_t, pagetable_t, uint64);
 void            uvmfree(pagetable_t, uint64);
 void            uvmunmap(pagetable_t, uint64, uint64, int);
 void            uvmclear(pagetable_t, uint64);
+uint64          cow_handle(pagetable_t, uint64);
 uint64          walkaddr(pagetable_t, uint64);
 uint64          kwalkaddr(pagetable_t, uint64);
 int             copyout(pagetable_t, uint64, char *, uint64);
